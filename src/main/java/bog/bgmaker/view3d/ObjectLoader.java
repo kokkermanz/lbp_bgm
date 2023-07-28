@@ -1,9 +1,7 @@
 package bog.bgmaker.view3d;
 
 import bog.bgmaker.Main;
-import bog.bgmaker.view3d.core.Bone;
-import bog.bgmaker.view3d.core.Model;
-import bog.bgmaker.view3d.core.Triangle;
+import bog.bgmaker.view3d.core.*;
 import bog.bgmaker.view3d.mainWindow.LoadedData;
 import bog.bgmaker.view3d.utils.CWLibUtils.SkeletonUtils;
 import bog.bgmaker.view3d.utils.Utils;
@@ -42,8 +40,11 @@ public class ObjectLoader {
         ArrayList<String> lines = Utils.readAllLines(fileName);
         ArrayList<Vector3f> vertices = new ArrayList<>();
         ArrayList<Vector3f> normals = new ArrayList<>();
-        ArrayList<Vector2f> textures = new ArrayList<>();
+        ArrayList<Vector4f> textures = new ArrayList<>();
         ArrayList<Vector3i> faces = new ArrayList<>();
+        ArrayList<Vector3f> tangents = new ArrayList();
+
+        ArrayList<String[]> f = new ArrayList<>();
 
         for(String line : lines)
         {
@@ -58,10 +59,13 @@ public class ObjectLoader {
                             Float.parseFloat(tokens[3])
                     );
                     vertices.add(verticesVec);
+                    tangents.add(new Vector3f());
                     break;
                 case "vt":
                     //textures
-                    Vector2f texturesVec = new Vector2f(
+                    Vector4f texturesVec = new Vector4f(
+                            Float.parseFloat(tokens[1]),
+                            Float.parseFloat(tokens[2]),
                             Float.parseFloat(tokens[1]),
                             Float.parseFloat(tokens[2])
                     );
@@ -78,13 +82,35 @@ public class ObjectLoader {
                     break;
                 case "f":
                     //faces
-                    processFace(tokens[1], faces);
-                    processFace(tokens[2], faces);
-                    processFace(tokens[3], faces);
+                    f.add(tokens);
                     break;
                 default:
                     break;
             }
+        }
+
+        for(String[] tokens : f)
+        {
+            Vector3i face1 = processFace(tokens[1], faces);
+            Vector3i face2 = processFace(tokens[2], faces);
+            Vector3i face3 = processFace(tokens[3], faces);
+
+            Vector3f delatPos1 = new Vector3f(vertices.get(face2.x)).sub(vertices.get(face1.x), new Vector3f());
+            Vector3f delatPos2 = new Vector3f(vertices.get(face3.x)).sub(vertices.get(face1.x), new Vector3f());
+            Vector4f uv0 = textures.get(face1.y);
+            Vector4f uv1 = textures.get(face2.y);
+            Vector4f uv2 = textures.get(face3.y);
+            Vector4f deltaUv1 = new Vector4f(uv1).sub(uv0, new Vector4f());
+            Vector4f deltaUv2 = new Vector4f(uv2).sub(uv0, new Vector4f());
+
+            float r = 1.0f / (deltaUv1.x * deltaUv2.y - deltaUv1.y * deltaUv2.x);
+            delatPos1.mul(deltaUv2.y);
+            delatPos2.mul(deltaUv1.y);
+            Vector3f tangent = new Vector3f(delatPos1).sub(delatPos2, new Vector3f());
+            tangent.mul(r);
+            tangents.get(face1.x).add(tangent);
+            tangents.get(face2.x).add(tangent);
+            tangents.get(face3.x).add(tangent);
         }
 
         ArrayList<Integer> indices = new ArrayList<>();
@@ -99,43 +125,61 @@ public class ObjectLoader {
             i++;
         }
 
-        float[] texCoordArr = new float[vertices.size() * 2];
+        float[] texCoordArr = new float[vertices.size() * 4];
         float[] normalsArr = new float[vertices.size() * 3];
+        float[] tangentsArr = new float[vertices.size() * 3];
 
         for(Vector3i face : faces)
-        {
-            processVertex(face.x, face.y, face.z, textures, normals, indices, texCoordArr, normalsArr);
-        }
+            processVertex(face.x, face.y, face.z, textures, normals, indices, tangents, texCoordArr, normalsArr, tangentsArr);
 
         int[] indicesArr = indices.stream().mapToInt((Integer v) -> v).toArray();
 
-        return loadModel(verticesArr, texCoordArr, normalsArr, indicesArr);
+        return loadModel(verticesArr, texCoordArr, normalsArr, indicesArr, tangentsArr);
     }
     public Model loadRMesh(RMesh mesh) {
         try {
             ArrayList<Vector3f> vertices = new ArrayList<>();
             ArrayList<Vector3f> normals = new ArrayList<>();
-            ArrayList<Vector2f> textures = new ArrayList<>();
+            ArrayList<Vector4f> textures = new ArrayList<>();
             ArrayList<Vector3i> faces = new ArrayList<>();
+            ArrayList<Vector3f> tangents = new ArrayList();
             for (Vector3f vertex : mesh.getVertices()) {
                 Vector3f verticesVec = new Vector3f(vertex.x, vertex.y, vertex.z);
                 vertices.add(verticesVec);
+                tangents.add(new Vector3f());
             }
             for (Vector3f normal : mesh.getNormals()) {
                 Vector3f normalsVec = new Vector3f(normal.x, normal.y, normal.z);
                 normals.add(normalsVec);
             }
             for (Vector2f texture : mesh.getUVs(0)) {
-                Vector2f texturesVec = new Vector2f(texture.x, 1.0F - texture.y);
+                Vector4f texturesVec = new Vector4f(texture.x, 1.0F - texture.y, texture.x, 1.0F - texture.y);
                 textures.add(texturesVec);
             }
             int[] indices1 = mesh.getTriangles();
             for (int i = 0; i < indices1.length; i++)
                 indices1[i] = indices1[i] + 1;
             for (int i = 0; i < indices1.length; i += 3) {
-                processFace("" + indices1[i] + "/" + indices1[i] + "/" + indices1[i], faces);
-                processFace("" + indices1[i + 1] + "/" + indices1[i + 1] + "/" + indices1[i + 1], faces);
-                processFace("" + indices1[i + 2] + "/" + indices1[i + 2] + "/" + indices1[i + 2], faces);
+                Vector3i face1 = processFace("" + indices1[i] + "/" + indices1[i] + "/" + indices1[i], faces);
+                Vector3i face2 = processFace("" + indices1[i + 1] + "/" + indices1[i + 1] + "/" + indices1[i + 1], faces);
+                Vector3i face3 = processFace("" + indices1[i + 2] + "/" + indices1[i + 2] + "/" + indices1[i + 2], faces);
+
+                Vector3f delatPos1 = new Vector3f(vertices.get(face2.x)).sub(vertices.get(face1.x), new Vector3f());
+                Vector3f delatPos2 = new Vector3f(vertices.get(face3.x)).sub(vertices.get(face1.x), new Vector3f());
+                Vector4f uv0 = textures.get(face1.y);
+                Vector4f uv1 = textures.get(face2.y);
+                Vector4f uv2 = textures.get(face3.y);
+                Vector4f deltaUv1 = new Vector4f(uv1).sub(uv0, new Vector4f());
+                Vector4f deltaUv2 = new Vector4f(uv2).sub(uv0, new Vector4f());
+
+                float r = 1.0f / (deltaUv1.x * deltaUv2.y - deltaUv1.y * deltaUv2.x);
+                delatPos1.mul(deltaUv2.y);
+                delatPos2.mul(deltaUv1.y);
+                Vector3f tangent = new Vector3f(delatPos1).sub(delatPos2, new Vector3f());
+                tangent.mul(r);
+                tangents.get(face1.x).add(tangent);
+                tangents.get(face2.x).add(tangent);
+                tangents.get(face3.x).add(tangent);
             }
             ArrayList<Integer> indices = new ArrayList<>();
             float[] verticesArr = new float[vertices.size() * 3];
@@ -146,10 +190,11 @@ public class ObjectLoader {
                 verticesArr[j * 3 + 2] = posV.z;
                 j++;
             }
-            float[] texCoordArr = new float[vertices.size() * 2];
+            float[] texCoordArr = new float[vertices.size() * 4];
             float[] normalsArr = new float[vertices.size() * 3];
+            float[] tangentsArr = new float[vertices.size() * 3];
             for (Vector3i face : faces)
-                processVertex(face.x, face.y, face.z, textures, normals, indices, texCoordArr, normalsArr);
+                processVertex(face.x, face.y, face.z, textures, normals, indices, tangents, texCoordArr, normalsArr, tangentsArr);
             int[] indicesArr = indices.stream().mapToInt(v -> v.intValue()).toArray();
 
             byte[][] js = mesh.getJoints();
@@ -174,7 +219,7 @@ public class ObjectLoader {
                 weights[i * 4 + 3] = ws[i].w;
             }
 
-            return loadModel(verticesArr, texCoordArr, normalsArr, indicesArr, joints, weights);
+            return loadModel(verticesArr, texCoordArr, normalsArr, indicesArr, joints, weights, tangentsArr);
         } catch (Exception e) {
             e.printStackTrace();
             return null;
@@ -194,55 +239,52 @@ public class ObjectLoader {
     }
 
     public Model loadSubmesh(RMesh mastermesh, Primitive submesh) {
-        try {
             ArrayList<Vector3f> vertices = new ArrayList<>();
             ArrayList<Vector3f> normals = new ArrayList<>();
-            ArrayList<Vector2f> textures = new ArrayList<>();
+            ArrayList<Vector4f> textures = new ArrayList<>();
             ArrayList<Vector3i> faces = new ArrayList<>();
+            ArrayList<Vector3f> tangents = new ArrayList();
+
             for (Vector3f vertex : mastermesh.getVertices()) {
                 Vector3f verticesVec = new Vector3f(vertex.x, vertex.y, vertex.z);
                 vertices.add(verticesVec);
+                tangents.add(new Vector3f());
             }
             for (Vector3f normal : mastermesh.getNormals()) {
                 Vector3f normalsVec = new Vector3f(normal.x, normal.y, normal.z);
                 normals.add(normalsVec);
             }
 
-            int channel = 0;
+            boolean has2UVs = false;
 
-            ResourceDescriptor mat = submesh.getMaterial();
-
-            if(mat != null) {
-                RGfxMaterial material = LoadedData.loadGfxMaterial(mat);
-
-                if (material != null)
-                {
-                    int outputBox = material.getOutputBox();
-                    for (int k = 0; k < material.boxes.size(); k++) {
-                        MaterialBox box = material.boxes.get(k);
-                        MaterialWire wire = material.findWireFrom(k);
+            RGfxMaterial material = LoadedData.loadGfxMaterial(submesh.getMaterial());
+            if (material != null)
+            {
+                int outputBox = material.getOutputBox();
+                for (int k = 0; k < material.boxes.size(); k++) {
+                    MaterialBox box = material.boxes.get(k);
+                    MaterialWire wire = material.findWireFrom(k);
+                    try
+                    {
                         if (box.type == 1) {
                             while (wire.boxTo != outputBox)
                                 wire = material.findWireFrom(wire.boxTo);
-                            if (wire.portTo == 0) {
-                                channel = box.getParameters()[4];
-                            }
+                            if (wire.portTo == 0)
+                                if(box.getParameters()[4] == 1)
+                                    has2UVs = true;
                         }
-                    }
+                    }catch (Exception e){e.printStackTrace();}
                 }
-
-//                if (material != null) {
-//                    int output = material.getOutputBox();
-//                    MaterialBox outBox = material.getBoxConnectedToPort(output, 0);
-//                    if(outBox.isTexture())
-//                        channel = outBox.getParameters()[4];
-//                }
             }
 
-            for (Vector2f texture : mastermesh.getUVs(channel)) {
-                Vector2f texturesVec = new Vector2f(texture.x, 1.0F - texture.y);
+            Vector2f[] UV0 = mastermesh.getUVs(0);
+            Vector2f[] UV1 = has2UVs ? mastermesh.getUVs(1) : UV0;
+
+            for (int i = 0; i < UV0.length; i++) {
+                Vector4f texturesVec = new Vector4f(UV0[i].x, 1.0F - UV0[i].y, UV1[i].x, 1.0F - UV1[i].y);
                 textures.add(texturesVec);
             }
+
             int[] indices1 = mastermesh.getTriangles(submesh);
 
             for (int i = 0; i < indices1.length; i += 3)
@@ -250,6 +292,23 @@ public class ObjectLoader {
                 faces.add(new Vector3i(indices1[i], indices1[i], indices1[i]));
                 faces.add(new Vector3i(indices1[i + 1], indices1[i + 1], indices1[i + 1]));
                 faces.add(new Vector3i(indices1[i + 2], indices1[i + 2], indices1[i + 2]));
+
+                Vector3f delatPos1 = new Vector3f(vertices.get(indices1[i + 1])).sub(vertices.get(indices1[i]), new Vector3f());
+                Vector3f delatPos2 = new Vector3f(vertices.get(indices1[i + 2])).sub(vertices.get(indices1[i]), new Vector3f());
+                Vector4f uv0 = textures.get(indices1[i]);
+                Vector4f uv1 = textures.get(indices1[i + 1]);
+                Vector4f uv2 = textures.get(indices1[i + 2]);
+                Vector4f deltaUv1 = new Vector4f(uv1).sub(uv0, new Vector4f());
+                Vector4f deltaUv2 = new Vector4f(uv2).sub(uv0, new Vector4f());
+
+                float r = 1.0f / (deltaUv1.x * deltaUv2.y - deltaUv1.y * deltaUv2.x);
+                delatPos1.mul(deltaUv2.y);
+                delatPos2.mul(deltaUv1.y);
+                Vector3f tangent = new Vector3f(delatPos1).sub(delatPos2, new Vector3f());
+                tangent.mul(r);
+                tangents.get(indices1[i]).add(tangent);
+                tangents.get(indices1[i + 1]).add(tangent);
+                tangents.get(indices1[i + 2]).add(tangent);
             }
 
             ArrayList<Integer> indices = new ArrayList<>();
@@ -261,10 +320,12 @@ public class ObjectLoader {
                 verticesArr[j * 3 + 2] = posV.z;
                 j++;
             }
-            float[] texCoordArr = new float[vertices.size() * 2];
+            float[] texCoordArr = new float[vertices.size() * 4];
             float[] normalsArr = new float[vertices.size() * 3];
+            float[] tangentsArr = new float[vertices.size() * 3];
+
             for (Vector3i face : faces)
-                processVertex(face.x, face.y, face.z, textures, normals, indices, texCoordArr, normalsArr);
+                processVertex(face.x, face.y, face.z, textures, normals, indices, tangents, texCoordArr, normalsArr, tangentsArr);
             int[] indicesArr = indices.stream().mapToInt(v -> v.intValue()).toArray();
 
             byte[][] js = mastermesh.getJoints();
@@ -289,24 +350,27 @@ public class ObjectLoader {
                 weights[i * 4 + 3] = ws[i].w;
             }
 
-            return loadModel(verticesArr, texCoordArr, normalsArr, indicesArr, joints, weights);
-        } catch (Exception e) {
-            e.printStackTrace();
-            return null;
-        }
+            return loadModel(verticesArr, texCoordArr, normalsArr, indicesArr, joints, weights, tangentsArr);
+
     }
 
-    public static void processVertex(int pos, int texCoord, int normal,
-                                     ArrayList<Vector2f> texCoordList, ArrayList<Vector3f> normalList, ArrayList<Integer> indicesList,
-                                     float[] texCoordArr, float[] normalArr)
+    public static void processVertex(int pos, int texCoord, int normal, ArrayList<Vector4f> texCoordList, ArrayList<Vector3f> normalList, ArrayList<Integer> indicesList, ArrayList<Vector3f> tangents, float[] texCoordArr, float[] normalArr, float[] tangentsArr)
     {
         indicesList.add(pos);
 
         if(texCoord >= 0)
         {
-            Vector2f texCoordVec = texCoordList.get(texCoord);
-            texCoordArr[pos * 2] = texCoordVec.x;
-            texCoordArr[pos * 2 + 1] = 1 - texCoordVec.y;
+            Vector4f texCoordVec = texCoordList.get(texCoord);
+            texCoordArr[pos * 4] = texCoordVec.x;
+            texCoordArr[pos * 4 + 1] = 1 - texCoordVec.y;
+            texCoordArr[pos * 4 + 2] = texCoordVec.z;
+            texCoordArr[pos * 4 + 3] = 1 - texCoordVec.w;
+
+            Vector3f tangent = tangents.get(pos).normalize();
+
+            tangentsArr[pos * 3] = tangent.x;
+            tangentsArr[pos * 3 + 1] = tangent.y;
+            tangentsArr[pos * 3 + 2] = tangent.z;
         }
 
         if(normal >= 0)
@@ -318,7 +382,7 @@ public class ObjectLoader {
         }
     }
 
-    public static void processFace(String token, ArrayList<Vector3i> faces)
+    public static Vector3i processFace(String token, ArrayList<Vector3i> faces)
     {
         String[] lineToken = token.split("/");
         int length = lineToken.length;
@@ -335,30 +399,45 @@ public class ObjectLoader {
 
         Vector3i facesVec = new Vector3i(pos, coords, normal);
         faces.add(facesVec);
+        return facesVec;
+    }
+
+    public Model loadModel(float[] vertices, float[] textureCoords, float[] normals, int[] indices, float[] tangents)
+    {
+        int vao = createVAO();
+        int[] vbos = new int[]{
+        storeIndicesBuffer(indices),
+        storeDataInAttribList(0, 3, vertices),
+        storeDataInAttribList(1, 4, textureCoords),
+        storeDataInAttribList(2, 3, normals),
+        storeDataInAttribList(5, 3, tangents)};
+        unbind();
+        return new Model(vao, vbos, indices.length, indices);
     }
 
     public Model loadModel(float[] vertices, float[] textureCoords, float[] normals, int[] indices)
     {
         int vao = createVAO();
         int[] vbos = new int[]{
-        storeIndicesBuffer(indices),
-        storeDataInAttribList(0, 3, vertices),
-        storeDataInAttribList(1, 2, textureCoords),
-        storeDataInAttribList(2, 3, normals)};
+                storeIndicesBuffer(indices),
+                storeDataInAttribList(0, 3, vertices),
+                storeDataInAttribList(1, 4, textureCoords),
+                storeDataInAttribList(2, 3, normals)};
         unbind();
         return new Model(vao, vbos, indices.length, indices);
     }
 
-    public Model loadModel(float[] vertices, float[] textureCoords, float[] normals, int[] indices, int[] joints, float[] weights)
+    public Model loadModel(float[] vertices, float[] textureCoords, float[] normals, int[] indices, int[] joints, float[] weights, float[] tangents)
     {
         int vao = createVAO();
         int[] vbos = new int[]{
                 storeIndicesBuffer(indices),
                 storeDataInAttribList(0, 3, vertices),
-                storeDataInAttribList(1, 2, textureCoords),
+                storeDataInAttribList(1, 4, textureCoords),
                 storeDataInAttribList(2, 3, normals),
                 storeDataInAttribList(3, 4, joints),
-                storeDataInAttribList(4, 4, weights)};
+                storeDataInAttribList(4, 4, weights),
+                storeDataInAttribList(5, 3, tangents)};
         unbind();
         return new Model(vao, vbos, indices.length, indices);
     }

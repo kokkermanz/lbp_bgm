@@ -10,6 +10,7 @@ import bog.bgmaker.view3d.renderer.gui.ingredients.Line;
 import bog.bgmaker.view3d.renderer.gui.ingredients.LineStrip;
 import bog.bgmaker.view3d.renderer.gui.ingredients.Quad;
 import bog.bgmaker.view3d.renderer.gui.ingredients.Scissor;
+import bog.bgmaker.view3d.utils.MousePicker;
 import org.joml.Vector2d;
 import org.joml.Vector2f;
 import org.joml.Vector2i;
@@ -146,23 +147,23 @@ public class GuiScreen {
         return elementFocused;
     }
 
-    public boolean onClick(Vector2d pos, int button, int action, int mods)
+    public boolean onClick(MouseInput mouseInput, int button, int action, int mods)
     {
         boolean overElement = false;
         for(int i = 0; i < guiElements.size(); i++)
         {
             Element element = guiElements.get(i);
 
-            if(element.isMouseOverElement(new Vector2f((float) pos.x, (float) pos.y)))
+            if(element.isMouseOverElement(new Vector2f((float) mouseInput.currentPos.x, (float) mouseInput.currentPos.y)))
                 overElement = true;
 
             boolean overOther = false;
 
             for(int o = i + 1; o < guiElements.size(); o++)
-                if(guiElements.get(o).isMouseOverElement(pos))
+                if(guiElements.get(o).isMouseOverElement(mouseInput.currentPos))
                     overOther = true;
 
-            element.onClick(pos, button, action, mods, overOther);
+            element.onClick(mouseInput.currentPos, button, action, mods, overOther);
         }
 
         for(int i = 0; i < guiElements.size(); i++)
@@ -200,34 +201,34 @@ public class GuiScreen {
 
     public void drawImage(String path, float x, float y, float width, float height)
     {
-        renderer.processGuiElement(new Quad(loader, path, new Vector2f(x, y), new Vector2f(width, height), false));
+        renderer.processGuiElement(new Quad(loader, path, new Vector2f(x, y), new Vector2f(width, height)));
     }
 
     public void drawImage(BufferedImage image, float x, float y, float width, float height)
     {
-        renderer.processGuiElement(new Quad(loader, image, new Vector2f(x, y), new Vector2f(width, height), false));
+        renderer.processGuiElement(new Quad(loader, image, new Vector2f(x, y), new Vector2f(width, height)));
     }
 
     public void drawImage(int image, float x, float y, float width, float height)
     {
-        renderer.processGuiElement(new Quad(loader, image, new Vector2f(x, y), new Vector2f(width, height), false));
+        renderer.processGuiElement(new Quad(loader, image, new Vector2f(x, y), new Vector2f(width, height)));
     }
 
     public void drawImageStatic(int image, float x, float y, float width, float height)
     {
-        renderer.processGuiElement(new Quad(loader, image, new Vector2f(x, y), new Vector2f(width, height), false).staticTexture());
+        renderer.processGuiElement(new Quad(loader, image, new Vector2f(x, y), new Vector2f(width, height)).staticTexture());
     }
 
     public void drawImageStatic(int image, float x, float y, float width, float height, Color color)
     {
-        Quad tex = new Quad(loader, image, new Vector2f(x, y), new Vector2f(width, height), false);
+        Quad tex = new Quad(loader, image, new Vector2f(x, y), new Vector2f(width, height));
         tex.color = color;
         renderer.processGuiElement(tex.staticTexture());
     }
 
     public void drawRect(int x, int y, int width, int height, Color color)
     {
-        renderer.processGuiElement(new Quad(loader, color, new Vector2f(x, y), new Vector2f(width, height), false));
+        renderer.processGuiElement(new Quad(loader, color, new Vector2f(x, y), new Vector2f(width, height)));
     }
 
     public void drawRectOutline(int x, int y, int width, int height, Color color, boolean smooth)

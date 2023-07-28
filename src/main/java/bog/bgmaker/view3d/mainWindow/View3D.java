@@ -83,6 +83,7 @@ public class View3D implements ILogic {
     public ArrayList<FileEntry> entries;
 
     GuiScreen currentScreen;
+    GuiScreen overrideScreen;
     public View3D(WindowMan window)
     {
         this.window = window;
@@ -166,16 +167,19 @@ public class View3D implements ILogic {
     {
         entities.add(e);
     }
-    
+
     private int[] prevSelection = new int[0];
-    public MousePicker mousePicker;
     public MousePicker centerPicker;
     public MouseInput mouseInput;
 
     @Override
-    public void update(MouseInput mouseInput, MousePicker mousePicker) {
-        boolean elementFocused = currentScreen == null ? false : currentScreen.elementFocused();
-        boolean overElement = currentScreen == null ? false : currentScreen.isMouseOverElement(mouseInput);
+    public void update(MouseInput mouseInput) {
+        boolean elementFocused = overrideScreen == null ? false : overrideScreen.elementFocused();
+        if(!elementFocused)
+            elementFocused = currentScreen == null ? false : currentScreen.elementFocused();
+        boolean overElement = overrideScreen == null ? false : overrideScreen.isMouseOverElement(mouseInput);
+        if(!overElement)
+            overElement = currentScreen == null ? false : currentScreen.isMouseOverElement(mouseInput);
 
         if(!elementFocused && !overElement)
             camera.movePos((cameraInc.x * Config.CAMERA_MOVE_SPEED) / (EngineMan.fps == 0 ? 60 : EngineMan.fps), (cameraInc.y * Config.CAMERA_MOVE_SPEED) / (EngineMan.fps == 0 ? 60 : EngineMan.fps), (cameraInc.z * Config.CAMERA_MOVE_SPEED) / (EngineMan.fps == 0 ? 60 : EngineMan.fps));
@@ -197,9 +201,7 @@ public class View3D implements ILogic {
             e.printStackTrace();
         }
 
-        if(this.mousePicker == null)
-            this.mousePicker = mousePicker;
-        this.mousePicker.update(camera);
+        mouseInput.mousePicker.update(camera);
 
         if(this.centerPicker == null)
             this.centerPicker = new MousePicker(null, window);
@@ -237,14 +239,14 @@ public class View3D implements ILogic {
 
             Vector4f sunColor = levelSettings.get(selectedPresetIndex).sunColor;
 //            renderer.processDirectionalLight(new DirectionalLight(new Vector3f(sunColor.x, sunColor.y, sunColor.z), new Vector3f(pos), levelSettings.get(selectedPresetIndex).sunMultiplier));
-//            TODO renderer.processPointLight(new PointLight(
-//                    new Vector3f(sunColor.x, sunColor.y, sunColor.z),
-//                    pos,
-//                    levelSettings.get(selectedPresetIndex).sunMultiplier,
-//                    1,
-//                    0,
-//                    0
-//            ));
+            renderer.processPointLight(new PointLight(
+                    new Vector3f(sunColor.x, sunColor.y, sunColor.z),
+                    pos,
+                    levelSettings.get(selectedPresetIndex).sunMultiplier,
+                    1,
+                    0,
+                    0
+            ));
         }catch (Exception e){}
 
         Vector3f sunPos = camera.worldToScreenPointF(pos, window);
@@ -286,6 +288,8 @@ public class View3D implements ILogic {
     {
         if(currentScreen != null)
             currentScreen.secondaryThread();
+        if(overrideScreen != null)
+            overrideScreen.secondaryThread();
     }
 
     @Override
@@ -294,7 +298,8 @@ public class View3D implements ILogic {
         if(!introPlayed)
             return;
 
-        currentScreen.onClick(mouseInput.currentPos, button, action, mods);
+        if(!overrideScreen.onClick(mouseInput, button, action, mods))
+            currentScreen.onClick(mouseInput, button, action, mods);
     }
 
     public int KEY_FORWARD = GLFW.GLFW_KEY_W;
@@ -303,6 +308,12 @@ public class View3D implements ILogic {
     public int KEY_RIGHT = GLFW.GLFW_KEY_D;
     public int KEY_UP = GLFW.GLFW_KEY_SPACE;
     public int KEY_DOWN = GLFW.GLFW_KEY_LEFT_SHIFT;
+    public int KEY_SHADING = GLFW.GLFW_KEY_Z;
+
+    boolean shadingMenu = false;
+    Vector2f shadingPos = new Vector2f();
+    Button solidShading;
+    Button materialShading;
 
     @Override
     public void onKey(int key, int scancode, int action, int mods)
@@ -310,7 +321,21 @@ public class View3D implements ILogic {
         if(!introPlayed)
             return;
 
-        boolean elementFocused = currentScreen.onKey(key, scancode, action, mods);
+        boolean elementFocused = overrideScreen.onKey(key, scancode, action, mods);
+        if(!elementFocused)
+            elementFocused = currentScreen.onKey(key, scancode, action, mods);
+
+        if(!elementFocused)
+        {
+            if(key == KEY_SHADING && action == GLFW.GLFW_PRESS)
+            {
+                shadingMenu = true;
+                shadingPos.x = (float) mouseInput.currentPos.x;
+                shadingPos.y = (float) mouseInput.currentPos.y;
+            }
+            else if(key == KEY_SHADING && action == GLFW.GLFW_RELEASE)
+                shadingMenu = false;
+        }
 
         if(key != GLFW.GLFW_KEY_LEFT_CONTROL && !window.isKeyPressed(GLFW.GLFW_KEY_LEFT_CONTROL))
         {
@@ -387,6 +412,7 @@ public class View3D implements ILogic {
             return;
 
         currentScreen.onChar(codePoint, modifiers);
+        overrideScreen.onChar(codePoint, modifiers);
     }
 
     @Override
@@ -396,8 +422,10 @@ public class View3D implements ILogic {
             return;
 
         currentScreen.onMouseScroll(mouseInput.currentPos, xOffset, yOffset);
+        overrideScreen.onMouseScroll(mouseInput.currentPos, xOffset, yOffset);
 
-        if(!currentScreen.isMouseOverElement(mouseInput) && !currentScreen.isElementFocused())
+        if(!(currentScreen.isMouseOverElement(mouseInput) || overrideScreen.isMouseOverElement(mouseInput)) &&
+                !(currentScreen.isElementFocused() || overrideScreen.isElementFocused()))
         {
             if(Config.CAMERA_MOVE_SPEED == 0 && yOffset > 0)
                 Config.CAMERA_MOVE_SPEED = 1;
@@ -523,10 +551,57 @@ public class View3D implements ILogic {
         MaterialEditing = new MaterialEditing(this);
 
         setCurrentScreen(ElementEditing);
+
+        overrideScreen = new GuiScreen(renderer, loader, window);
+        solidShading = new Button("solidShading", "Solid", new Vector2f(-1000, 50), new Vector2f(200, 30), 10, renderer, loader, window) {
+            @Override
+            public void clickedButton(int button, int action, int mods) {
+                Config.MATERIAL_PREVIEW_SHADING = false;
+                if(!Config.MATERIAL_PREVIEW_SHADING)
+                {
+                    solidShading.isClicked = true;
+                    materialShading.isClicked = false;
+                }
+            }
+
+            @Override
+            public void setClicked(boolean clicked) {
+
+            }
+        };
+        materialShading = new Button("materialShading", "Material Preview", new Vector2f(-1000, 50), new Vector2f(200, 30), 10, renderer, loader, window) {
+            @Override
+            public void clickedButton(int button, int action, int mods) {
+                Config.MATERIAL_PREVIEW_SHADING = true;
+                if(Config.MATERIAL_PREVIEW_SHADING)
+                {
+                    solidShading.isClicked = false;
+                    materialShading.isClicked = true;
+                }
+            }
+
+            @Override
+            public void setClicked(boolean clicked) {
+
+            }
+        };
+
+        if(Config.MATERIAL_PREVIEW_SHADING)
+        {
+            solidShading.isClicked = false;
+            materialShading.isClicked = true;
+        }
+        else
+        {
+            solidShading.isClicked = true;
+            materialShading.isClicked = false;
+        }
+
+        overrideScreen.guiElements.add(solidShading);
+        overrideScreen.guiElements.add(materialShading);
     }
 
     public boolean introPlayed = false;
-
 
     private void drawUI(MouseInput mouseInput) {
 
@@ -597,6 +672,8 @@ public class View3D implements ILogic {
             mouseInput.currentPos = new Vector2d();
         if(currentScreen != null)
             currentScreen.draw(mouseInput);
+        if(overrideScreen != null)
+            overrideScreen.draw(mouseInput);
 
         if(!introPlayed)
         {
@@ -610,6 +687,23 @@ public class View3D implements ILogic {
                 drawImageStatic(this.logo, window.width / 2 - 461 / 2, window.height / 2 - 461 / 2, 461, 461);
                 drawRect(0, 0, window.width, window.height, new Color(1f, 1f, 1f, in));
             } else introPlayed = true;
+        }
+
+        if(shadingMenu)
+        {
+            drawCircle(shadingPos, (getStringWidth("Shading", 10) / 2) * 1.15f, 20, Config.INTERFACE_PRIMARY_COLOR);
+            drawCircle(shadingPos, (getStringWidth("Shading", 10) / 2) * 1.35f, 20, Config.INTERFACE_PRIMARY_COLOR);
+            drawString("Shading", Config.FONT_COLOR, (int) (shadingPos.x - getStringWidth("Shading", 10) / 2), (int) (shadingPos.y - getFontHeight(10) / 2), 10);
+
+            solidShading.pos.x = shadingPos.x + 50;
+            materialShading.pos.x = shadingPos.x - 50 - materialShading.size.x;
+            solidShading.pos.y = shadingPos.y - solidShading.size.y / 2;
+            materialShading.pos.y = shadingPos.y - materialShading.size.y / 2;
+        }
+        else
+        {
+            solidShading.pos.x = -1000;
+            materialShading.pos.x = -1000;
         }
     }
 
@@ -670,27 +764,27 @@ public class View3D implements ILogic {
 
     private void drawImage(String path, float x, float y, float width, float height)
     {
-        renderer.processGuiElement(new Quad(loader, path, new Vector2f(x, y), new Vector2f(width, height), false));
+        renderer.processGuiElement(new Quad(loader, path, new Vector2f(x, y), new Vector2f(width, height)));
     }
 
     private void drawImage(BufferedImage image, float x, float y, float width, float height)
     {
-        renderer.processGuiElement(new Quad(loader, image, new Vector2f(x, y), new Vector2f(width, height), false));
+        renderer.processGuiElement(new Quad(loader, image, new Vector2f(x, y), new Vector2f(width, height)));
     }
 
     private void drawImage(int image, float x, float y, float width, float height)
     {
-        renderer.processGuiElement(new Quad(loader, image, new Vector2f(x, y), new Vector2f(width, height), false));
+        renderer.processGuiElement(new Quad(loader, image, new Vector2f(x, y), new Vector2f(width, height)));
     }
 
     private void drawImageStatic(int image, float x, float y, float width, float height)
     {
-        renderer.processGuiElement(new Quad(loader, image, new Vector2f(x, y), new Vector2f(width, height), false).staticTexture());
+        renderer.processGuiElement(new Quad(loader, image, new Vector2f(x, y), new Vector2f(width, height)).staticTexture());
     }
 
     private void drawRect(int x, int y, int width, int height, Color color)
     {
-        renderer.processGuiElement(new Quad(loader, color, new Vector2f(x, y), new Vector2f(width, height), false));
+        renderer.processGuiElement(new Quad(loader, color, new Vector2f(x, y), new Vector2f(width, height)));
     }
 
     private void drawRectOutline(int x, int y, int width, int height, Color color, boolean smooth)
@@ -1376,7 +1470,8 @@ public class View3D implements ILogic {
             presets.add(LevelSettingsUtils.clone(preset));
 
         settings.presets = presets;
-        settings.backdropAmbience = ((Textbox)((DropDownTab)LevelSettingsEditing.getElementByID("presetEditor")).getElementByID("ambiance")).getText().isEmpty() ? "ambiences/amb_empty_world" : ((Textbox)LevelSettingsEditing.getElementByID("ambiance")).getText();
+        Textbox amb = ((Textbox)((DropDownTab)LevelSettingsEditing.getElementByID("presetEditor")).getElementByID("ambiance"));
+        settings.backdropAmbience = amb == null || amb.getText().isEmpty() ? "ambiences/amb_empty_world" : amb.getText();
 
         lighting.setPart(Part.LEVEL_SETTINGS, settings);
 
